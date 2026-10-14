@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Page Fault Risk Monitor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <header>
+        <h1>Live Page Fault Risk Monitor</h1>
+        <p>Automatic system sampling and per-process model estimates</p>
+    </header>
+
+    <main>
+        <section class="card status-card">
+            <h2>System Snapshot</h2>
+            <div class="metric-row"><span>CPU</span><strong id="cpu_percent">--</strong></div>
+            <div class="metric-row"><span>Memory used</span><strong id="memory_percent">--</strong></div>
+            <div class="metric-row"><span>Memory available</span><strong id="free_memory_percent">--</strong></div>
+            <div class="metric-row"><span>Swap used</span><strong id="swap_percent">--</strong></div>
+            <div class="metric-row"><span>OS page faults / sec</span><strong id="page_faults_per_sec">--</strong></div>
+            <div class="metric-row"><span>Pages / sec (hard-fault activity)</span><strong id="hard_faults_per_sec">--</strong></div>
+            <div class="metric-row"><span>Active processes</span><strong id="process_count">--</strong></div>
+            <div class="metric-row"><span>Sampled</span><strong id="timestamp">--</strong></div>
+            <div class="metric-row"><span>Telemetry</span><strong id="telemetry_status">--</strong></div>
+            <button id="refreshButton" type="button">Refresh now</button>
+        </section>
+
+        <section class="card result-card" aria-live="polite">
+            <h2>Page-Fault Risk Estimate</h2>
+            <p>Highest process risk: <strong id="risk_score">--</strong></p>
+            <p>Risk band: <strong id="category">Waiting...</strong></p>
+            <p id="message">Waiting for the first live sample...</p>
+            <p class="model-note">Model uses live resident-memory ratios and system memory data. Training labels are synthetic, so estimates are not calibrated real-world probabilities.</p>
+
+            <div class="heat-box">
+                <h3>Processes ranked by model score</h3>
+                <ul id="process_risk_list"><li>Waiting for process samples...</li></ul>
+            </div>
+
+            <div class="heat-box">
+                <h3>Token Booth Priority: Low Risk First</h3>
+                <p id="token_summary">Waiting for risk scores...</p>
+                <ul id="token_booth_list"><li>Waiting for token policy...</li></ul>
+            </div>
+        </section>
+    </main>
+
+    <script src="{{ url_for('static', filename='script.js', v='live-model-v1') }}"></script>
+</body>
+</html>

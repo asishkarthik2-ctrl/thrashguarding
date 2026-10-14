@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Thrash Guard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+```
+<header>
+    <h1>Thrash Guard</h1>
+    <p>Intelligent Thrashing Prediction and Prevention</p>
+</header>
+
+<main>
+    <section class="card">
+        <h2>System Monitoring</h2>
+
+        <label>Memory Utilization (%)</label>
+        <input type="number" id="memory" value="75" min="0" max="100">
+
+        <label>CPU Utilization (%)</label>
+        <input type="number" id="cpu" value="45" min="0" max="100">
+
+        <label>Page Fault Rate</label>
+        <input type="number" id="page_faults" value="60" min="0">
+
+        <label>Disk I/O Activity (%)</label>
+        <input type="number" id="disk_io" value="70" min="0" max="100">
+
+        <label>Active Processes</label>
+        <input type="number" id="processes" value="8" min="1">
+
+        <button onclick="predictRisk()">Predict Thrashing Risk</button>
+    </section>
+
+    <section class="card">
+        <h2>Prediction Results</h2>
+
+        <p>Risk Score: <strong id="risk_score">--</strong></p>
+        <p>Risk Category: <strong id="category">Not predicted</strong></p>
+
+        <p id="message">
+            Enter the system parameters and click Predict.
+        </p>
+    </section>
+</main>
+
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+```
+
+</body>
+</html>
