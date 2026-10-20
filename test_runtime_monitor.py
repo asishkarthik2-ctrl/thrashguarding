@@ -1,7 +1,10 @@
 import unittest
+import tempfile
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import numpy as np
+import pandas as pd
 import app
 
 
@@ -32,6 +35,27 @@ class LiveRiskTests(unittest.TestCase):
             "memory_pressure": 0.75,
             "free_memory_percent": 0.25,
         })
+
+    def test_model_trains_and_saves_locally_when_artifact_is_missing(self):
+        training_data = pd.DataFrame({
+            "resident_pages": [10, 20, 80, 90],
+            "working_set_size": [100, 100, 100, 100],
+            "memory_pressure": [20, 30, 80, 90],
+            "free_frames": [180, 150, 20, 5],
+            "page_fault": [1, 1, 0, 0],
+        })
+        with tempfile.TemporaryDirectory() as temp_dir:
+            model_path = Path(temp_dir) / "model.pkl"
+            dataset_path = Path(temp_dir) / "dataset.csv"
+            training_data.to_csv(dataset_path, index=False)
+
+            local_model, status = app.load_or_train_model(model_path, dataset_path)
+
+            self.assertEqual(status, "trained_offline")
+            self.assertTrue(model_path.is_file())
+            self.assertEqual(local_model.predict_proba(
+                app.prepare_training_features(training_data)
+            ).shape, (4, 2))
 
     def test_process_scores_use_model_probabilities(self):
         fake_model = Mock()
@@ -71,6 +95,8 @@ class LiveRiskTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         result = response.get_json()
         self.assertEqual(result["risk_score"], 80.0)
+        self.assertEqual(result["execution_mode"], "offline")
+        self.assertEqual(result["model_status"], app.MODEL_STATUS)
         self.assertEqual(result["snapshot"]["hard_faults_per_sec"], 4.0)
         self.assertEqual(len(result["process_predictions"]), 2)
         self.assertNotIn("page_heat_scores", result)

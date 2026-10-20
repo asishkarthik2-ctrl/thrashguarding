@@ -16,6 +16,9 @@ async function refreshMonitor() {
         document.getElementById("process_count").textContent = snapshot.process_count ?? "--";
         document.getElementById("timestamp").textContent = snapshot.timestamp ?? "--";
         document.getElementById("telemetry_status").textContent = result.telemetry_status ?? "unavailable";
+        document.getElementById("model_status").textContent = result.execution_mode === "offline"
+            ? `offline (${result.model_status || "local model"})`
+            : "unavailable";
 
         document.getElementById("risk_score").textContent = result.risk_score === null ? "--" : `${result.risk_score}%`;
         document.getElementById("category").textContent = result.category;
@@ -54,5 +57,5 @@ async function refreshMonitor() {
 document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("refreshButton").addEventListener("click", refreshMonitor);
     refreshMonitor();
-    setInterval(refreshMonitor, 3000);
+    setInterval(refreshMonitor, 1000);
 });

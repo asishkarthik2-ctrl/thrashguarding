@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
@@ -17,10 +19,11 @@ from sklearn.model_selection import train_test_split
 from xgboost import XGBClassifier
 import joblib
 
-MODEL_PATH = "page_fault_model.pkl"
-DATASET_PATH = Path("page_fault_dataset.csv")
-METRICS_PATH = Path("page_fault_metrics.json")
-COMPARISON_PATH = Path("model_comparison.json")
+APP_DIR = Path(__file__).resolve().parent
+MODEL_PATH = APP_DIR / "page_fault_model.pkl"
+DATASET_PATH = APP_DIR / "page_fault_dataset.csv"
+METRICS_PATH = APP_DIR / "page_fault_metrics.json"
+COMPARISON_PATH = APP_DIR / "model_comparison.json"
 LIVE_FEATURE_COLUMNS = ["resident_ratio", "memory_pressure", "free_memory_percent"]
 MAX_DATASET_FREE_FRAMES = 219.0
 
@@ -106,7 +109,7 @@ def prepare_live_features(df):
         "resident_ratio": df["resident_pages"] / df["working_set_size"].clip(lower=1),
         "memory_pressure": df["memory_pressure"].clip(0, 100) / 100.0,
         "free_memory_percent": df["free_frames"].clip(0, MAX_DATASET_FREE_FRAMES) / MAX_DATASET_FREE_FRAMES,
-    })
+    }, columns=LIVE_FEATURE_COLUMNS)
 
 
 def evaluate_model(model, X_train, X_test, y_train, y_test, name):

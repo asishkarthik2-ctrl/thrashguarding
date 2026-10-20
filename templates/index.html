@@ -24,6 +24,7 @@
             <div class="metric-row"><span>Active processes</span><strong id="process_count">--</strong></div>
             <div class="metric-row"><span>Sampled</span><strong id="timestamp">--</strong></div>
             <div class="metric-row"><span>Telemetry</span><strong id="telemetry_status">--</strong></div>
+            <div class="metric-row"><span>Model</span><strong id="model_status">offline</strong></div>
             <button id="refreshButton" type="button">Refresh now</button>
         </section>
 
@@ -32,7 +33,7 @@
             <p>Highest process risk: <strong id="risk_score">--</strong></p>
             <p>Risk band: <strong id="category">Waiting...</strong></p>
             <p id="message">Waiting for the first live sample...</p>
-            <p class="model-note">Model uses live resident-memory ratios and system memory data. Training labels are synthetic, so estimates are not calibrated real-world probabilities.</p>
+            <p class="model-note">Runs locally without an internet connection. The model uses live resident-memory ratios and system memory data; training labels are synthetic, so scores are estimates, not calibrated real-world probabilities.</p>
 
             <div class="heat-box">
                 <h3>Processes ranked by model score</h3>
@@ -47,6 +48,6 @@
         </section>
     </main>
 
-    <script src="{{ url_for('static', filename='script.js', v='live-model-v1') }}"></script>
+    <script src="{{ url_for('static', filename='script.js', v='live-model-v2') }}"></script>
 </body>
 </html>

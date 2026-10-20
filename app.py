@@ -3,20 +3,77 @@ import subprocess
 import threading
 import time
 from collections import deque
+from pathlib import Path
 from typing import Any
 
 import joblib
 import pandas as pd
 import psutil
 from flask import Flask, jsonify, render_template
+from sklearn.ensemble import RandomForestClassifier
 
 app = Flask(__name__)
 
-MODEL_PATH = "page_fault_model.pkl"
-model = None
+APP_DIR = Path(__file__).resolve().parent
+MODEL_PATH = APP_DIR / "page_fault_model.pkl"
+DATASET_PATH = APP_DIR / "page_fault_dataset.csv"
+LIVE_MODEL_FEATURES = ["resident_ratio", "memory_pressure", "free_memory_percent"]
+MAX_DATASET_FREE_FRAMES = 219.0
 
-if os.path.exists(MODEL_PATH):
-    model = joblib.load(MODEL_PATH)
+
+def prepare_training_features(df: pd.DataFrame) -> pd.DataFrame:
+    return pd.DataFrame({
+        "resident_ratio": df["resident_pages"] / df["working_set_size"].clip(lower=1),
+        "memory_pressure": df["memory_pressure"].clip(0, 100) / 100.0,
+        "free_memory_percent": df["free_frames"].clip(0, MAX_DATASET_FREE_FRAMES)
+        / MAX_DATASET_FREE_FRAMES,
+    }, columns=LIVE_MODEL_FEATURES)
+
+
+def load_or_train_model(
+    model_path: Path = MODEL_PATH,
+    dataset_path: Path = DATASET_PATH,
+) -> tuple[Any, str]:
+    if model_path.is_file():
+        return joblib.load(model_path), "pretrained"
+    if not dataset_path.is_file():
+        raise FileNotFoundError(
+            f"No local model or training dataset found. Expected {model_path} or {dataset_path}."
+        )
+
+    dataset = pd.read_csv(dataset_path)
+    required_columns = {
+        "resident_pages",
+        "working_set_size",
+        "memory_pressure",
+        "free_frames",
+        "page_fault",
+    }
+    missing_columns = required_columns.difference(dataset.columns)
+    if missing_columns:
+        raise ValueError(
+            f"Local training dataset is missing required columns: {', '.join(sorted(missing_columns))}."
+        )
+
+    raw_labels = dataset["page_fault"]
+    if not raw_labels.isin([0, 1]).all() or raw_labels.nunique() < 2:
+        raise ValueError("The local training dataset must contain both page_fault labels 0 and 1.")
+    labels = raw_labels.astype(int)
+
+    local_model = RandomForestClassifier(
+        n_estimators=150,
+        max_depth=10,
+        min_samples_leaf=2,
+        random_state=42,
+        n_jobs=-1,
+    )
+    local_model.fit(prepare_training_features(dataset), labels)
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(local_model, model_path)
+    return local_model, "trained_offline"
+
+
+model, MODEL_STATUS = load_or_train_model()
 
 
 def windows_has_admin_rights() -> bool:
@@ -236,7 +293,7 @@ class TelemetryCollector:
             return dict(self.current_snapshot)
 
 
-telemetry_collector = TelemetryCollector(sample_interval=3.0, average_window=5)
+telemetry_collector = TelemetryCollector(sample_interval=1.0, average_window=5)
 
 
 def safe_system_snapshot() -> dict[str, Any]:
@@ -244,9 +301,6 @@ def safe_system_snapshot() -> dict[str, Any]:
     if snapshot.get("telemetry_status") == "initializing":
         return telemetry_collector.sample()
     return snapshot
-
-
-LIVE_MODEL_FEATURES = ["resident_ratio", "memory_pressure", "free_memory_percent"]
 
 
 def build_live_model_input(snapshot: dict[str, Any]) -> pd.DataFrame:
@@ -367,7 +421,9 @@ def predict():
         "risk_score": risk_score,
         "category": category,
         "score_type": "live_model_estimate",
-        "score_note": "Live process memory ratios scored by a model trained on synthetic page_fault labels; not real-world calibrated.",
+        "execution_mode": "offline",
+        "model_status": MODEL_STATUS,
+        "score_note": "Live process memory ratios scored locally by a model trained on synthetic page_fault labels; not a calibrated real-world probability.",
         "telemetry_status": snapshot.get("telemetry_status", "unavailable"),
         "snapshot": snapshot,
         "process_predictions": process_predictions,
