@@ -57,6 +57,30 @@ class LiveRiskTests(unittest.TestCase):
                 app.prepare_training_features(training_data)
             ).shape, (4, 2))
 
+    def test_windows_memory_counters_are_collected_in_one_command(self):
+        completed_process = Mock(
+            returncode=0,
+            stdout=(
+                r"\\laptop\memory\page faults/sec=123.4" + "\n"
+                + r"\\laptop\memory\pages/sec=5.6" + "\n"
+            ),
+        )
+        with patch.object(app.os, "name", "nt"), patch.object(
+            app.subprocess, "run", return_value=completed_process
+        ) as run:
+            counters = app.collect_windows_memory_counters()
+
+        self.assertEqual(counters, (123.4, 5.6))
+        run.assert_called_once()
+
+    def test_single_sample_window_does_not_smooth_live_values(self):
+        collector = app.TelemetryCollector(average_window=1)
+        collector._apply_moving_average({"cpu_percent": 10.0})
+
+        latest = collector._apply_moving_average({"cpu_percent": 90.0})
+
+        self.assertEqual(latest["cpu_percent"], 90.0)
+
     def test_process_scores_use_model_probabilities(self):
         fake_model = Mock()
         fake_model.predict_proba.return_value = np.array([[0.2, 0.8], [0.7, 0.3]])

@@ -86,68 +86,57 @@ def windows_has_admin_rights() -> bool:
         return False
 
 
-def windows_get_perf_counter(metric_name: str) -> float:
+def collect_windows_memory_counters() -> tuple[float, float]:
+    if os.name != "nt":
+        return 0.0, 0.0
+
     try:
         result = subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-             f"(Get-Counter -Counter '{metric_name}' -ErrorAction Stop | Select-Object -ExpandProperty CounterSamples | Select-Object -ExpandProperty CookedValue) -join ''"],
+            [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "$samples = (Get-Counter -Counter '\\Memory\\Page Faults/sec','\\Memory\\Pages/sec' "
+                "-ErrorAction Stop).CounterSamples; "
+                "foreach ($sample in $samples) { Write-Output ($sample.Path + '=' + "
+                "$sample.CookedValue.ToString([System.Globalization.CultureInfo]::InvariantCulture)) }",
+            ],
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=5,
             check=False,
         )
-        if result.returncode != 0 or not result.stdout.strip():
-            return 0.0
-        values = result.stdout.strip().splitlines()
-        if not values:
-            return 0.0
+    except (OSError, subprocess.TimeoutExpired):
+        return 0.0, 0.0
+
+    if result.returncode != 0:
+        return 0.0, 0.0
+
+    counters = {"page_faults_per_sec": 0.0, "hard_faults_per_sec": 0.0}
+    for line in result.stdout.splitlines():
+        path, separator, value = line.rpartition("=")
+        if not separator:
+            continue
+        normalized_path = path.lower().replace("\\", "")
         try:
-            return float(values[0].strip())
+            counter_value = float(value.strip())
         except ValueError:
-            return 0.0
-    except Exception:
-        return 0.0
+            continue
+        if normalized_path.endswith("page faults/sec"):
+            counters["page_faults_per_sec"] = counter_value
+        elif normalized_path.endswith("pages/sec"):
+            counters["hard_faults_per_sec"] = counter_value
 
-
-def collect_windows_page_faults() -> tuple[float, dict[str, float]]:
-    page_fault_total = windows_get_perf_counter("\\Memory\\Page Faults/sec") if os.name == "nt" else 0.0
-    per_process: dict[str, float] = {}
-    if os.name != "nt":
-        return page_fault_total, per_process
-
-    try:
-        output = subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-             "Get-Counter '\\Process(*)\\Page Faults/sec' | Select-Object -ExpandProperty CounterSamples | ForEach-Object { $_.InstanceName + ':' + $_.CookedValue }"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-        if output.returncode == 0 and output.stdout.strip():
-            for line in output.stdout.strip().splitlines():
-                if ":" not in line:
-                    continue
-                inst, value = line.split(":", 1)
-                try:
-                    value_float = float(value.strip())
-                except ValueError:
-                    continue
-                instance_name = inst.strip()
-                if instance_name.lower() != "_total":
-                    per_process[instance_name] = value_float
-    except Exception:
-        pass
-
-    return page_fault_total, per_process
+    return counters["page_faults_per_sec"], counters["hard_faults_per_sec"]
 
 
 def collect_process_memory(limit: int = 12) -> list[dict[str, Any]]:
     process_rows = []
-    for process in psutil.process_iter(["pid", "name"]):
+    for process in psutil.process_iter(["pid", "name", "memory_info"]):
         try:
-            memory = process.memory_info()
-            if memory.vms <= 0:
+            memory = process.info["memory_info"]
+            if memory is None or memory.vms <= 0:
                 continue
             process_rows.append({
                 "pid": int(process.info["pid"]),
@@ -162,12 +151,17 @@ def collect_process_memory(limit: int = 12) -> list[dict[str, Any]]:
 
 
 class TelemetryCollector:
-    def __init__(self, sample_interval: float = 3.0, average_window: int = 5):
+    def __init__(self, sample_interval: float = 1.0, average_window: int = 1):
         self.sample_interval = sample_interval
         self.average_window = average_window
         self.lock = threading.Lock()
+        self.counter_lock = threading.Lock()
         self.stop_event = threading.Event()
         self.history: deque[dict[str, Any]] = deque(maxlen=average_window)
+        self.memory_counters = {
+            "page_faults_per_sec": 0.0,
+            "hard_faults_per_sec": 0.0,
+        }
         self.current_snapshot: dict[str, Any] = {
             "source": "laptop-monitor",
             "risk_mode": "read-only",
@@ -193,8 +187,8 @@ class TelemetryCollector:
             disk = psutil.disk_usage("/")
             cpu = psutil.cpu_percent(interval=None)
             proc_count = len(psutil.pids())
-            page_fault_total, per_process = collect_windows_page_faults()
-            hard_faults = windows_get_perf_counter("\\Memory\\Pages/sec") if os.name == "nt" else 0.0
+            with self.counter_lock:
+                memory_counters = dict(self.memory_counters)
 
             snapshot = {
                 "source": "laptop-monitor",
@@ -205,9 +199,9 @@ class TelemetryCollector:
                 "swap_percent": round(float(swap.percent), 2),
                 "disk_percent": round(float(disk.percent), 2),
                 "process_count": int(proc_count),
-                "page_faults_per_sec": round(float(page_fault_total), 2),
-                "hard_faults_per_sec": round(float(hard_faults or 0.0), 2),
-                "process_page_faults": {k: round(float(v), 2) for k, v in per_process.items()},
+                "page_faults_per_sec": round(memory_counters["page_faults_per_sec"], 2),
+                "hard_faults_per_sec": round(memory_counters["hard_faults_per_sec"], 2),
+                "process_page_faults": {},
                 "processes": collect_process_memory(),
                 "privilege_status": "admin" if windows_has_admin_rights() else "limited",
                 "free_memory_percent": round(float(vm.available / vm.total * 100), 2),
@@ -278,22 +272,36 @@ class TelemetryCollector:
             return
 
         self._thread = threading.Thread(target=self._worker, daemon=True)
+        self._counter_thread = threading.Thread(target=self._counter_worker, daemon=True)
         self._thread.start()
+        self._counter_thread.start()
 
     def stop(self) -> None:
         self.stop_event.set()
 
     def _worker(self) -> None:
         while not self.stop_event.is_set():
+            sample_started = time.monotonic()
             self.sample()
-            self.stop_event.wait(self.sample_interval)
+            elapsed = time.monotonic() - sample_started
+            self.stop_event.wait(max(0.0, self.sample_interval - elapsed))
+
+    def _counter_worker(self) -> None:
+        while not self.stop_event.is_set():
+            page_faults, hard_faults = collect_windows_memory_counters()
+            with self.counter_lock:
+                self.memory_counters = {
+                    "page_faults_per_sec": page_faults,
+                    "hard_faults_per_sec": hard_faults,
+                }
+            self.stop_event.wait(2.0)
 
     def get_snapshot(self) -> dict[str, Any]:
         with self.lock:
             return dict(self.current_snapshot)
 
 
-telemetry_collector = TelemetryCollector(sample_interval=1.0, average_window=5)
+telemetry_collector = TelemetryCollector(sample_interval=1.0, average_window=1)
 
 
 def safe_system_snapshot() -> dict[str, Any]:
