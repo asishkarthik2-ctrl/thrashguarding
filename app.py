@@ -131,23 +131,26 @@ def collect_windows_memory_counters() -> tuple[float, float]:
     return counters["page_faults_per_sec"], counters["hard_faults_per_sec"]
 
 
-def collect_process_memory(limit: int = 12) -> list[dict[str, Any]]:
+def collect_process_memory(limit: int | None = None) -> list[dict[str, Any]]:
     process_rows = []
+    cpu_count = psutil.cpu_count(logical=True) or 1
     for process in psutil.process_iter(["pid", "name", "memory_info"]):
         try:
             memory = process.info["memory_info"]
             if memory is None or memory.vms <= 0:
                 continue
+            process_cpu_percent = max(0.0, float(process.cpu_percent(interval=None)))
             process_rows.append({
                 "pid": int(process.info["pid"]),
                 "name": process.info.get("name") or "Unknown process",
                 "resident_ratio": round(max(0.0, min(1.0, memory.rss / memory.vms)), 6),
                 "rss_mb": round(memory.rss / (1024 * 1024), 2),
+                "cpu_percent": round(process_cpu_percent / cpu_count, 2),
             })
         except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess):
             continue
     process_rows.sort(key=lambda item: item["rss_mb"], reverse=True)
-    return process_rows[:limit]
+    return process_rows if limit is None else process_rows[:limit]
 
 
 class TelemetryCollector:
@@ -158,6 +161,7 @@ class TelemetryCollector:
         self.counter_lock = threading.Lock()
         self.stop_event = threading.Event()
         self.history: deque[dict[str, Any]] = deque(maxlen=average_window)
+        self.previous_processes: dict[int, str] | None = None
         self.memory_counters = {
             "page_faults_per_sec": 0.0,
             "hard_faults_per_sec": 0.0,
@@ -187,6 +191,21 @@ class TelemetryCollector:
             disk = psutil.disk_usage("/")
             cpu = psutil.cpu_percent(interval=None)
             proc_count = len(psutil.pids())
+            processes = collect_process_memory()
+            current_processes = {process["pid"]: process["name"] for process in processes}
+            with self.lock:
+                previous_processes = self.previous_processes
+                self.previous_processes = current_processes
+            if previous_processes is None:
+                started_names = []
+                stopped_names = []
+            else:
+                started_names = [
+                    current_processes[pid] for pid in current_processes.keys() - previous_processes.keys()
+                ]
+                stopped_names = [
+                    previous_processes[pid] for pid in previous_processes.keys() - current_processes.keys()
+                ]
             with self.counter_lock:
                 memory_counters = dict(self.memory_counters)
 
@@ -199,10 +218,19 @@ class TelemetryCollector:
                 "swap_percent": round(float(swap.percent), 2),
                 "disk_percent": round(float(disk.percent), 2),
                 "process_count": int(proc_count),
+                "visible_process_count": len(processes),
+                "visible_process_memory_mb": round(
+                    sum(process["rss_mb"] for process in processes), 2
+                ),
+                "process_cpu_percent": round(
+                    min(100.0, sum(process.get("cpu_percent", 0.0) for process in processes)), 2
+                ),
+                "processes_started": started_names,
+                "processes_stopped": stopped_names,
                 "page_faults_per_sec": round(memory_counters["page_faults_per_sec"], 2),
                 "hard_faults_per_sec": round(memory_counters["hard_faults_per_sec"], 2),
                 "process_page_faults": {},
-                "processes": collect_process_memory(),
+                "processes": processes,
                 "privilege_status": "admin" if windows_has_admin_rights() else "limited",
                 "free_memory_percent": round(float(vm.available / vm.total * 100), 2),
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -219,6 +247,11 @@ class TelemetryCollector:
                 "swap_percent": 0.0,
                 "disk_percent": 0.0,
                 "process_count": 0,
+                "visible_process_count": 0,
+                "visible_process_memory_mb": 0.0,
+                "process_cpu_percent": 0.0,
+                "processes_started": [],
+                "processes_stopped": [],
                 "page_faults_per_sec": 0.0,
                 "hard_faults_per_sec": 0.0,
                 "process_page_faults": {},
@@ -341,6 +374,7 @@ def score_live_processes(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
             "process_name": process["name"],
             "pid": process["pid"],
             "rss_mb": process["rss_mb"],
+            "cpu_percent": process.get("cpu_percent", 0.0),
             "risk_score": risk_score,
             "risk_level": classify_risk_level(risk_score),
         })

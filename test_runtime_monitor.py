@@ -1,6 +1,7 @@
 import unittest
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import numpy as np
@@ -18,6 +19,11 @@ class LiveRiskTests(unittest.TestCase):
             "page_faults_per_sec": 120.0,
             "hard_faults_per_sec": 4.0,
             "process_count": 2,
+            "visible_process_count": 2,
+            "visible_process_memory_mb": 750.0,
+            "process_cpu_percent": 0.0,
+            "processes_started": [],
+            "processes_stopped": [],
             "timestamp": "2026-10-14 12:00:00",
             "processes": [
                 {"pid": 100, "name": "app-one", "resident_ratio": 0.6, "rss_mb": 500.0},
@@ -81,6 +87,66 @@ class LiveRiskTests(unittest.TestCase):
 
         self.assertEqual(latest["cpu_percent"], 90.0)
 
+    def test_process_collection_includes_all_readable_processes_and_cpu(self):
+        processes = []
+        for pid in range(1, 16):
+            process = Mock()
+            process.info = {
+                "pid": pid,
+                "name": f"app-{pid}",
+                "memory_info": SimpleNamespace(
+                    rss=pid * 1024 * 1024,
+                    vms=pid * 2048 * 1024,
+                ),
+            }
+            process.cpu_percent.return_value = float(pid)
+            processes.append(process)
+
+        with patch.object(app.psutil, "cpu_count", return_value=2), patch.object(
+            app.psutil, "process_iter", return_value=processes
+        ):
+            collected = app.collect_process_memory()
+
+        self.assertEqual(len(collected), 15)
+        self.assertEqual(collected[0]["name"], "app-15")
+        self.assertEqual(collected[0]["cpu_percent"], 7.5)
+
+    def test_process_changes_are_reported_between_samples(self):
+        collector = app.TelemetryCollector()
+        first_sample = {
+            "telemetry_status": "live",
+            "process_count": 2,
+            "processes": [
+                {"pid": 1, "name": "existing", "rss_mb": 10.0},
+                {"pid": 2, "name": "closed", "rss_mb": 10.0},
+            ],
+        }
+        second_sample = {
+            "telemetry_status": "live",
+            "process_count": 2,
+            "processes": [
+                {"pid": 1, "name": "existing", "rss_mb": 10.0},
+                {"pid": 3, "name": "opened", "rss_mb": 10.0},
+            ],
+        }
+        with patch.object(app.psutil, "virtual_memory", return_value=SimpleNamespace(
+            total=100, available=50, percent=50
+        )), patch.object(app.psutil, "swap_memory", return_value=SimpleNamespace(percent=0)), patch.object(
+            app.psutil, "disk_usage", return_value=SimpleNamespace(percent=0)
+        ), patch.object(app.psutil, "cpu_percent", return_value=10), patch.object(
+            app.psutil, "pids", return_value=[1, 2]
+        ), patch.object(app, "collect_process_memory", side_effect=[
+            first_sample["processes"], second_sample["processes"]
+        ]), patch.object(app, "windows_has_admin_rights", return_value=False), patch.object(
+            app.psutil, "Process", return_value=Mock(memory_info=Mock(return_value=SimpleNamespace(rss=1024)))
+        ):
+            first = collector._read_raw_snapshot()
+            second = collector._read_raw_snapshot()
+
+        self.assertEqual(first["processes_started"], [])
+        self.assertEqual(second["processes_started"], ["opened"])
+        self.assertEqual(second["processes_stopped"], ["closed"])
+
     def test_process_scores_use_model_probabilities(self):
         fake_model = Mock()
         fake_model.predict_proba.return_value = np.array([[0.2, 0.8], [0.7, 0.3]])
@@ -122,7 +188,9 @@ class LiveRiskTests(unittest.TestCase):
         self.assertEqual(result["execution_mode"], "offline")
         self.assertEqual(result["model_status"], app.MODEL_STATUS)
         self.assertEqual(result["snapshot"]["hard_faults_per_sec"], 4.0)
+        self.assertEqual(result["snapshot"]["visible_process_count"], 2)
         self.assertEqual(len(result["process_predictions"]), 2)
+        self.assertEqual(result["snapshot"]["process_cpu_percent"], 0.0)
         self.assertNotIn("page_heat_scores", result)
 
 

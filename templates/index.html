@@ -15,13 +15,17 @@
     <main>
         <section class="card status-card">
             <h2>System Snapshot</h2>
-            <div class="metric-row"><span>CPU</span><strong id="cpu_percent">--</strong></div>
-            <div class="metric-row"><span>Memory used</span><strong id="memory_percent">--</strong></div>
+            <div class="metric-row"><span>Total system CPU</span><strong id="cpu_percent">--</strong></div>
+            <div class="metric-row"><span>CPU used by listed processes</span><strong id="process_cpu_percent">--</strong></div>
+            <div class="metric-row"><span>Total system memory used</span><strong id="memory_percent">--</strong></div>
             <div class="metric-row"><span>Memory available</span><strong id="free_memory_percent">--</strong></div>
             <div class="metric-row"><span>Swap used</span><strong id="swap_percent">--</strong></div>
             <div class="metric-row"><span>OS page faults / sec</span><strong id="page_faults_per_sec">--</strong></div>
             <div class="metric-row"><span>Pages / sec (hard-fault activity)</span><strong id="hard_faults_per_sec">--</strong></div>
             <div class="metric-row"><span>Active processes</span><strong id="process_count">--</strong></div>
+            <div class="metric-row"><span>Processes visible here</span><strong id="visible_process_count">--</strong></div>
+            <div class="metric-row"><span>RAM used by listed processes</span><strong id="visible_process_memory">--</strong></div>
+            <div class="metric-row"><span>Since previous sample</span><strong id="process_changes">--</strong></div>
             <div class="metric-row"><span>Sampled</span><strong id="timestamp">--</strong></div>
             <div class="metric-row"><span>Telemetry</span><strong id="telemetry_status">--</strong></div>
             <div class="metric-row"><span>Model</span><strong id="model_status">offline</strong></div>
@@ -36,7 +40,10 @@
             <p class="model-note">Runs locally without an internet connection. The model uses live resident-memory ratios and system memory data; training labels are synthetic, so scores are estimates, not calibrated real-world probabilities.</p>
 
             <div class="heat-box">
-                <h3>Processes ranked by model score</h3>
+                <h3>All running processes (including background processes)</h3>
+                <label for="process_filter">Filter by app/process name</label>
+                <input id="process_filter" type="search" placeholder="For example: WhatsApp">
+                <p id="process_list_summary">Waiting for process samples...</p>
                 <ul id="process_risk_list"><li>Waiting for process samples...</li></ul>
             </div>
 
@@ -48,6 +55,6 @@
         </section>
     </main>
 
-    <script src="{{ url_for('static', filename='script.js', v='live-model-v2') }}"></script>
+    <script src="{{ url_for('static', filename='script.js', v='live-model-v4') }}"></script>
 </body>
 </html>
